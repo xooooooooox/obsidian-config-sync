@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.25.3
+
+- Fixed the settings search offering a **Custom rule** entry for a plugin that another device syncs but this one doesn't have installed. The Advanced tab rightly showed no such rule, so the hit led nowhere; such a plugin now answers a search once, as the Community item it is
+- Fixed a plugin that another device syncs but this one doesn't have installed appearing under its raw id (`remotely-save`) instead of the name your other device knows it by (`Remotely Save`). The stored name now shows on its Community card, in search results, in the stop-syncing prompt, and in the Community plugins card's per-plugin **Enabled on** rows
+
+## 2.25.2
+
+- Fixed the expanded card's Files block squeezing into a third of a phone's width. The entry list kept a desktop alignment indent meant for wide panes, so file names, inline diffs and the Use theirs / Keep mine pair all started 138px in — Keep mine could be clipped clean off the screen. On a narrow pane the block now spans the card, and the two buttons split the full width
+- Changed the diff toolbar to truncate a long filename with an ellipsis instead of letting it push the toolbar's buttons past the card edge; the full name still heads the bigger window that the maximize button opens
+- Changed a diff too large to show inline to drop its view and fold toggles — with no lines to act on they were dead controls crowding the narrowest toolbar the app draws; only the filename and "Open in a bigger window" remain
+- Added an honest sentence for a To pull / To push row whose file contents already match. The other side just captured more recently, so the card used to promise "Pulls settings." while offering no Files row and no diff to back it up. It now states what pressing the button actually does: "Changes nothing in your settings; just clears this row back to in sync." — said only once the comparison has settled with nothing to show
+- Fixed an open Files diff quietly answering a different question while a fresh comparison runs: it could lose the remote's file contents and fall back to comparing the store against this device instead of against the remote the row was built from
+
+## 2.25.1
+
+- Fixed a pull dragging along folders of items you never picked. An item's companion folders — Appearance's themes and snippets — had no row of their own, so unticking the item could not hold their files back: every pull compared and merged them regardless, surfacing conflicts about things you didn't choose. They now travel only when their item does, in both directions
+- Fixed a waiting change inside a companion folder counting as nothing to do. The item's own row now answers for its whole family: it shows the direction, wears a quiet note with how many files ride along, and counts in To pull / To push like any other waiting item
+- Added provenance to the conflict prompt when it shows more than you picked: conflicts on items you picked come first, and anything the whole-remote comparison brought in sits under its own header that says why it is there. A list that is entirely yours stays flat, with no headers to read past
+- Changed the conflict prompt's numbers to count only files and actual writes. The sync rules the two sides compare silently — never shown in the prompt, never resolved by Pull — used to inflate "items compared" by a hundred-plus entries about nothing; now the clean-merge summary appears only when something beyond your conflicts will actually be written, and the Apply button's count matches it
+- Fixed the card of a quiet row with differing files blaming a "Push only" rule that wasn't there. That sentence is now reserved for a rule that actually closes the incoming direction; when the true cause is records that can't be dated — captured before Config Sync stamped them — the card says so and names the way out: capture on both sides, and the side captured last wins
+- Changed the "you can leave Config Sync out of this remote" hint to show at most once per prompt, and only until that remote carries a written rule for Config Sync's own item — once you have made that choice, the prompt stops teaching it
+
 ## 2.25.0
 
 - Fixed encrypted items always looking out of sync with a remote. Every encryption draws fresh randomness, so two vaults holding the very same setting still hold different bytes — Config Sync now compares what the two copies say instead of the bytes they are stored as, and an encrypted item that matches finally reads as in sync

@@ -259,7 +259,10 @@ functions.
   back out of it). `defsForForeignItems(defs, items, betaIds)` synthesizes a def for a stored
   community item whose plugin isn't installed here — every entry in `items.community` earns one,
   **`{synced:false}` included** — that entry's mere presence is this device's capture mask for the
-  on/off-list element, and it is how a card the user turned off is turned back on.
+  on/off-list element, and it is how a card the user turned off is turned back on. Such a def is
+  marked `synthesized: true`: its `label` is a bare-id placeholder, so anything displaying it
+  resolves the name through the host's stored-label chain (`displayName` → the store lock's
+  `display.label`) — `SettingTab.itemLabel` is that resolution's one producer.
   `defsForForeignItems`' `known.has(id)` guard (does `items.community` have an entry at all) is the
   whole test — an enablement rule lives on the CARRIER item, never on the plugin's own entry, so
   there is no entry shape that fails to earn a card.
