@@ -1,3 +1,5 @@
+
+
 <p align="center"><img src="assets/logo.svg" width="96" alt="Config Sync logo"></p>
 
 # Config Sync
@@ -53,7 +55,7 @@ The full tour — Sync Center anatomy, field rules, encryption, the install engi
 Everything the plugin does by default stays inside your vault: Capture/Apply copy files between your config folder and the data folder, and your own note sync moves them between devices. Three **optional, desktop-only** remote behaviors go further and are disclosed here:
 
 - **Network use (git remotes only).** If you add a git remote under Settings → Remotes, Pull/Push run the `git` binary against the URL you configured — that is the only network access the plugin ever performs. No telemetry, no other endpoints.
-- **Files outside the vault (vault remotes and git temp clones).** If you add a remote of type "Another vault", Pull/Push read/write the absolute store path you configured (typically another vault's data folder). Git pushes additionally use a temporary clone directory that is removed afterwards.
+- **Files outside the vault (vault remotes and git temp clones).** If you add a remote of type "Another vault", Pull/Push read/write the absolute store path you configured (typically another vault's data folder). Git Pull/Push additionally use temporary clone directories that are removed afterwards.
 - **Access tokens (git remotes only).** A token you link to a git remote is held in Obsidian's own keychain on that device and handed to `git` through the environment, never through the command line. Only the secret's *name* is written to the plugin's settings — the token itself never enters `data.json`, the store, or any error message. Config Sync never sends the remotes list anywhere either (it is a locked this-device field), so the name reaches another device only if your own vault sync copies the plugin's `data.json`; each device links its own token, or none at all.
 
 All three are inert until you configure a remote, and never run without an explicit Pull or Push from the Sync Center.
