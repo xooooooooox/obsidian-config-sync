@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.25.4
+
+- Fixed a desktop-only plugin's card wearing two identical monitor badges when its settings file carries a Desktop only rule. That rule merely restates what the manifest already enforces, so it no longer counts toward the cyan device-scoped badge — a real pin, such as a key set to Mobile only, still does
+
 ## 2.25.3
 
 - Fixed the settings search offering a **Custom rule** entry for a plugin that another device syncs but this one doesn't have installed. The Advanced tab rightly showed no such rule, so the hit led nowhere; such a plugin now answers a search once, as the Community item it is

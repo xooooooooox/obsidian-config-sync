@@ -1284,8 +1284,10 @@ noted):
     innate, colored = your choice (the two desktop meanings must read apart) ·
     carrier cards' two counts (`carrierBadgeCounts`): cyan `N device-scoped`
     (`config-sync-card-badge-scoped`; class rules only, and never one that merely restates a
-    desktop-only manifest — those decide nothing, and counting them lets rules nobody chose set both
-    the number and the `soleKind` glyph, which is how an all-mobile card ends up wearing `contrast`)
+    desktop-only manifest — the same filter a plain card's own `N device-scoped` count applies to
+    its fileRule/key/per-element pins: restating rules decide nothing, and counting them lets rules
+    nobody chose set both the number and the `soleKind` glyph, which is how an all-mobile card ends
+    up wearing `contrast` and a desktop-only plugin's header two indistinguishable monitors)
     and purple `N left to me` · `lock`+n `N encrypted`;
     **a count badge names the SPECIFIC thing when everything it counts agrees, and falls back to a
     neutral summariser only when the set genuinely mixes** (`soleKind`, itemCard.ts) — all-desktop

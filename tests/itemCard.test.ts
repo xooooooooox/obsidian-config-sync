@@ -156,6 +156,25 @@ describe("computeBadges", () => {
     ]);
   });
 
+  // The count badge's half of the restatesInnate rule: the same two monitors, produced through a
+  // file/key pin instead of the enablement rule.
+  it("a restating Desktop-only pin on a desktop-only plugin is not device-scoped", () => {
+    const dOnly: ItemDef = { ...COMMUNITY_DEF, desktopOnly: true };
+    const restating = cfg({ settingsFile: { mode: "plain", rules: {}, perElement: {}, fileRule: { sharing: perClass("desktop"), encrypted: false } } });
+    expect(computeBadges(dOnly, restating, FOLLOWS_ALL, null)).toEqual([
+      { text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" },
+    ]);
+    // A mobile pin beside it is a real decision and still counts — and the restating desktop pin
+    // stays out of both the number and the glyph (2 + `contrast` would be rules nobody made).
+    const withMobileKey = cfg({
+      settingsFile: { mode: "fields", rules: { a: { sharing: perClass("mobile"), encrypted: false }, b: { sharing: perClass("desktop"), encrypted: false } }, perElement: {} },
+    });
+    expect(computeBadges(dOnly, withMobileKey, FOLLOWS_ALL, null)).toEqual([
+      { text: "desktop-only plugin", cls: "config-sync-card-badge-plat", icon: "monitor" },
+      { text: "1 device-scoped", cls: "config-sync-card-badge-scoped", icon: "smartphone", count: 1 },
+    ]);
+  });
+
   it("a class rule shows the matching on: badge — only when the def has an enablement", () => {
     expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("desktop")), null)).toEqual([{ text: "on: desktop", cls: "config-sync-card-badge-desktop", icon: "monitor" }]);
     expect(computeBadges(COMMUNITY_DEF, cfg(), RULE(perClass("mobile")), null)).toEqual([{ text: "on: mobile", cls: "config-sync-card-badge-mobile", icon: "smartphone" }]);

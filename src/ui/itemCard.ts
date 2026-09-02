@@ -84,10 +84,10 @@ const CARRIER_LOCAL_BADGE_CLASS = "config-sync-card-badge-mine";
 // below) can count a carrier's OWN class pins without also walking `perElement` — on a carrier,
 // perElement IS the element rules carrierBadgeCounts already counts via enablementRules, so folding
 // countClassPinned's perElement loop in here too would double-count the same rules under one badge.
-function fileAndRuleClassKinds(item: Item): DeviceClass[] {
+function fileAndRuleClassKinds(item: Item): ("desktop" | "mobile")[] {
   const sf = item.settingsFile;
   if (sf === undefined) return [];
-  const out: DeviceClass[] = [];
+  const out: ("desktop" | "mobile")[] = [];
   const fileClass = sf.fileRule === undefined ? null : sharingClass(sf.fileRule.sharing);
   if (fileClass !== null) out.push(fileClass);
   for (const rule of Object.values(sf.rules)) {
@@ -130,7 +130,7 @@ function leftToMeIcon(states: readonly DeviceElementState[]): string {
 // Returns one entry PER PINNED RULE, not a total: the badge needs both how many there are and
 // whether they agree on a class, and deriving those from two separate walks is how they would come
 // to disagree.
-export function classPinnedKinds(item: Item): DeviceClass[] {
+export function classPinnedKinds(item: Item): ("desktop" | "mobile")[] {
   const sf = item.settingsFile;
   if (sf === undefined) return [];
   const out = fileAndRuleClassKinds(item);
@@ -301,7 +301,12 @@ export function computeBadges(
       badges.push({ text: `${carrier.local.length} left to me`, cls: CARRIER_LOCAL_BADGE_CLASS, icon: leftToMeIcon(carrier.local), count: carrier.local.length });
     }
   } else {
-    const classPinned = classPinnedKinds(item);
+    // Same filter carrierBadgeCounts applies to element rules: a `Desktop only` pin on a plugin
+    // whose manifest is already desktop-only decides nothing. Counted anyway, it puts a cyan
+    // `monitor` beside the grey innate chip — and below 2 the corner digit is suppressed, so the
+    // header shows two indistinguishable monitors. It can also hand the `soleKind` glyph to rules
+    // nobody made, exactly as on a carrier.
+    const classPinned = classPinnedKinds(item).filter((cls) => !restatesInnate(perClass(cls), def.desktopOnly === true));
     if (classPinned.length > 0) {
       badges.push({ text: `${classPinned.length} device-scoped`, cls: SCOPED_BADGE_CLASS, icon: deviceScopedIcon(classPinned), count: classPinned.length });
     }
