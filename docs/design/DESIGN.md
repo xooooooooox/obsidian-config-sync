@@ -1186,6 +1186,17 @@ noted):
     the whole file, capturedAt/hash churn filtered out. Mixed state (own data.json diff pending
     too): the diff renders first, then the same rows under "Capture also corrects the store's
     record…" — the block lists everything capture writes, nothing rides along silently.
+  - **Update available banner** (`-self-behind/-behind-txt/-behind-btn/-behind-err/-behind-phase`):
+    the store was captured on a newer Config Sync than this device runs. Primary action
+    **Update Config Sync** (`mod-cta`) updates in place: it reuses the install pipeline (BRAT
+    index → community catalog, pinned to the store's recorded version), writes the plugin files
+    while the old code keeps running, and only after everything is on disk reloads the plugin
+    (disable → enable; the Sync Center leaf revives as a deferred view). Install phases render
+    on a line under the button; completion posts a Notice ("Config Sync updated to <v>.
+    Reloading…") from the old instance before the reload. On failure the installer's own message
+    renders in the banner and only then does an "Open Community plugins" button appear as the
+    manual path — error guidance, not a silent fallback; the primary button stays enabled for a
+    retry. The in-run self-update refusal (runStateAction) stays and points here.
 - **Qualifier autocomplete** `config-sync-qac/-qac-opt` (is-sel)/`-qac-ic/-qac-txt/-qac-desc` — the `key:value` search dropdown under both search boxes, anchored by `config-sync-search-wrap`; opens on focus (an empty box lists every key), key→value suggestions, keyboard-navigable. Logic in `src/ui/qualifierSearch.ts`.
 - **Settings tab** (`src/ui/SettingTab.ts`): `config-sync-tabs/-tab` (phone hides inactive
   labels — the pattern the mobile filter pills echo), rows/expand/form-*, fields editor

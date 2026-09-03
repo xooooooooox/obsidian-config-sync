@@ -1,4 +1,4 @@
-import { App, ButtonComponent, ItemView, Menu, Modal, Platform, WorkspaceLeaf, setIcon, setTooltip } from "obsidian";
+import { App, ButtonComponent, ItemView, Menu, Modal, Notice, Platform, WorkspaceLeaf, setIcon, setTooltip } from "obsidian";
 import { ApplyItem, CaptureItem, orderInstallsCatalogFirst, ProgressFn, StateAction } from "../core/ConfigSyncCore";
 import { lockRefFor, refItemId } from "../core/itemKeys";
 import { GroupStatus, GroupState, RemoteCheck, RemoteDiffEntry, RemoteDiffFile } from "../core/status";
@@ -449,6 +449,10 @@ export interface SyncCenterHost {
   // non-companion, a custom group, or the legacy enabled-css-snippets switch list (out of scope).
   companionParentOf(group: string): string | null;
   captureItems(items: CaptureItem[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
+  // In-place self update (download first, reload only once the files are down). `onInstalled`
+  // fires between the two — the last moment the old instance can still speak. Rejects with the
+  // installer's message on failure; nothing on disk has changed then.
+  updateSelf(targetVersion: string | null, onInstalled?: (version: string) => void, onPhase?: (phase: string) => void): Promise<string>;
   applyItems(items: ApplyItem[], onProgress?: ProgressFn): Promise<GroupResult[] | null>;
   reloadApp(): void;
   remotes(): Remote[]; // [] on mobile
@@ -675,6 +679,8 @@ export class SyncCenterView extends ItemView {
   private selfInfo: SelfSyncInfo | null = null;
   private selfDiffOpen = new Set<Direction>(); // which self data.json diffs are expanded
   private selfFlagsDiffOpen = false; // the flags nudge's store.lock.json expander
+  private selfUpdating = false; // an in-place self update is running — ends in a plugin reload or an error
+  private selfUpdateError: string | null = null; // last failed self update's message; cleared on retry
   private landedInitial = false; // cold-start auto-land to the Config Sync pane happens once
   private search = "";
   private betaIds: Set<string> = new Set();
@@ -1759,6 +1765,28 @@ export class SyncCenterView extends ItemView {
     setting?.openTabById("config-sync");
   }
 
+  // In-place self update. On success the plugin (this view included) reloads from inside
+  // host.updateSelf, so there is nothing to re-render here — the Notice is posted between the
+  // file write and the reload, the old instance's last word. On failure nothing on disk has
+  // changed; the banner re-renders with the installer's message and the manual path.
+  private async runSelfUpdate(btn: HTMLButtonElement, phaseEl: HTMLElement, targetVersion: string): Promise<void> {
+    if (this.selfUpdating || this.running) return;
+    this.selfUpdating = true;
+    this.selfUpdateError = null;
+    btn.disabled = true;
+    try {
+      await this.host.updateSelf(
+        targetVersion,
+        (version) => new Notice(`Config Sync updated to ${version}. Reloading…`),
+        (phase) => phaseEl.setText(phase)
+      );
+    } catch (e) {
+      this.selfUpdating = false;
+      this.selfUpdateError = (e as Error).message;
+      this.render(this.renderGen);
+    }
+  }
+
   private openCommunityPlugins(): void {
     const setting = (this.app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
     setting?.open();
@@ -1784,15 +1812,22 @@ export class SyncCenterView extends ItemView {
     cfgBtn.addEventListener("click", () => this.openConfigSyncSettings());
 
     if (info.updateAvailable !== null) {
-      // Advisory only — no update action: updating config-sync from inside a run would
-      // unload the code executing the run, so the pane can only point at Obsidian's updater.
+      const store = info.updateAvailable.store;
       const behind = pane.createDiv({ cls: "config-sync-self-behind" });
       behind.createSpan({
         cls: "config-sync-self-behind-txt",
-        text: `Captured on Config Sync ${info.updateAvailable.store}; this device runs ${info.updateAvailable.local}. Update before adopting or applying.`,
+        text: `Captured on Config Sync ${store}; this device runs ${info.updateAvailable.local}. Update before adopting or applying.`,
       });
-      const open = behind.createEl("button", { cls: "config-sync-self-behind-btn", text: "Open Community plugins" });
-      open.addEventListener("click", () => this.openCommunityPlugins());
+      if (this.selfUpdateError !== null) behind.createDiv({ cls: "config-sync-self-behind-err", text: this.selfUpdateError });
+      const upd = behind.createEl("button", { cls: "mod-cta", text: "Update Config Sync" });
+      upd.disabled = this.running || this.selfUpdating;
+      // Only after a failed attempt: the manual path, as the error's way out — never up front.
+      if (this.selfUpdateError !== null) {
+        const open = behind.createEl("button", { cls: "config-sync-self-behind-btn", text: "Open Community plugins" });
+        open.addEventListener("click", () => this.openCommunityPlugins());
+      }
+      const phase = behind.createDiv({ cls: "config-sync-self-behind-phase" });
+      upd.addEventListener("click", () => void this.runSelfUpdate(upd, phase, store));
     }
 
     if (info.state === "coldstart") {

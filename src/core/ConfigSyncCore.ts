@@ -10,7 +10,7 @@ import { isFutureSchemaDocument, SCHEMA_FUTURE_APPLY_MESSAGE } from "./settingsM
 import { applyTransform, captureTransform, classPatterns, contentUnchanged, excludingPerElement, groupHasCiphertext, stripPatterns } from "./modes";
 import { hashDirSide, hashFileSide, sha256Hex } from "./ledger";
 import { classifyMerge, MergeConflict, MergePlan } from "./merge";
-import { SELF_GROUP_NAME, SELF_ITEM_REF } from "./catalog";
+import { SELF_GROUP_NAME, SELF_ITEM_ID, SELF_ITEM_REF } from "./catalog";
 import { isPlainObject, keyMatchesAny } from "./sanitize";
 import { readPerElementArray, sharingOf } from "./perElement";
 import { addForceOn, applySwitchList, captureSwitchList, localRealPath, memberUniverse, parseSwitchList, readLocalSwitchList, subtractForceOff, isSwitchListGroup, SwitchList, switchListsEqual, writeLocalSwitchList } from "./switchList";
@@ -936,6 +936,31 @@ export interface ApplyItem {
 // installed (so the caller can warn on a mismatch).
 export type PluginInstallFn = (pluginId: string, onPhase?: (phase: string) => void, targetVersion?: string) => Promise<string>;
 
+// One-tap self update — the path a run can't take (runStateAction refuses it there: the generic
+// update disables first, which would kill the very code executing the run). Ordered so failure
+// never leaves a half-state: the download writes the plugin's files while the OLD code keeps
+// running, and only after everything is on disk does the disable → enable reload swap it in.
+// An install error therefore leaves the running plugin and its files untouched.
+// `onInstalled` fires between the write and the reload — the caller's last chance to speak
+// (a Notice) from the old instance.
+export async function updateSelfPlugin(
+  install: PluginInstallFn,
+  plugins: PluginHost,
+  targetVersion: string | null,
+  onInstalled?: (version: string) => void,
+  onPhase?: (phase: string) => void
+): Promise<string> {
+  const version = await install(SELF_ITEM_ID, onPhase, targetVersion ?? undefined);
+  // Before the reload, or the enable below constructs the new instance from the registry's
+  // pre-update manifest snapshot (new code, old version string).
+  await plugins.reloadPluginManifests();
+  onInstalled?.(version);
+  onPhase?.("Reloading…");
+  await plugins.disablePlugin(SELF_ITEM_ID);
+  await plugins.enablePlugin(SELF_ITEM_ID);
+  return version;
+}
+
 interface StatePrelude {
   note: { kind: "ok" | "warn"; text: string } | null;
   messages: string[];
@@ -999,12 +1024,13 @@ async function runStateAction(
       skipConfig: true,
     };
   }
-  if (pluginId === "config-sync") {
+  if (pluginId === SELF_ITEM_ID) {
     // Updating/reinstalling the self plugin from inside a run would disable the very code
-    // executing it (update disables first) — refuse and point at Obsidian's own updater.
+    // executing it (update disables first) — refuse and point at the dedicated path
+    // (updateSelfPlugin above), which downloads first and reloads only after the files are down.
     return {
       note: { kind: "warn", text: "⚠ update skipped" },
-      messages: ["Config Sync updates itself through Obsidian's plugin updater (Settings → Community plugins)"],
+      messages: ["Config Sync updates itself from its own pane in the Sync Center (or Settings → Community plugins)"],
       skipConfig: true,
     };
   }

@@ -12,6 +12,7 @@ import {
   applyWithActions,
   backfillLockLabels,
   captureWithActions, CaptureItem,
+  updateSelfPlugin,
   deviceExcludedPluginIds,
   excludeOptedOutItems,
   groupsForDevice,
@@ -903,6 +904,8 @@ export default class ConfigSyncPlugin extends Plugin {
           return null;
         }
       },
+      updateSelf: (targetVersion: string | null, onInstalled?: (version: string) => void, onPhase?: (phase: string) => void): Promise<string> =>
+        updateSelfPlugin(this.installPlugin(), this.pluginHost(), targetVersion, onInstalled, onPhase),
       captureItems: async (items: CaptureItem[], onProgress?: ProgressFn) => {
         if (this.schemaStopped()) return null; // schema stop
         try {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.25.6
+
+- Changed the self pane's update-available banner from sending you to Settings → Community plugins to updating in place: **Update Config Sync** downloads the version the store was captured on and reloads the plugin, with download progress shown under the button. The files are written while the current version keeps running, and the reload happens only once everything is on disk, so a failed download changes nothing; the banner then shows the download error and only at that point offers the manual Community plugins path
+
 ## 2.25.5
 
 - Fixed the "desktop-only plugin not recorded in the store yet" nudge bouncing between devices forever after a plugin update changed whether it can run on phones. A device still holding the older version kept writing its outdated answer into the store on every capture, and every up-to-date device then asked to capture it right back. A device now only speaks for a plugin's phone-compatibility when it actually has the version the store records; a version mismatch shows up as the version difference it is

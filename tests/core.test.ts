@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { appSource, pluginSource, withRef } from "./lock";
 import { StoreLockEntry } from "../src/core/types";
 import { lockEntry, STORE_LOCK_VERSION } from "../src/core/manifest";
-import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, PUSH_RACE_MESSAGE, PUSH_STALE_MESSAGE, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels, excludeOptedOutItems } from "../src/core/ConfigSyncCore";
+import { CoreContext, capture, captureWithActions, loadManifest, groupsForDevice, apply, applyWithActions, planImport, applyImport, PendingPull, ExternalStoreReader, pushExternal, PUSH_RACE_MESSAGE, PUSH_STALE_MESSAGE, ExternalStoreWriter, pluginIdForGroup, orderInstallsCatalogFirst, readGroups, writeGroups, deviceExcludedPluginIds, isSelfStoreRel, remoteGroupsFrom, groupForStoreRel, backfillLockLabels, excludeOptedOutItems, updateSelfPlugin } from "../src/core/ConfigSyncCore";
 import { parseStoreLock, parseSyncManifest } from "../src/core/manifest";
 import { SwitchList } from "../src/core/switchList";
 import { SELF_GROUP_NAME, SELF_ITEM_REF, selfPresetRules } from "../src/core/catalog";
@@ -979,7 +979,7 @@ function selfDataJson(groups: SyncGroup[]): string {
 }
 
 describe("self-update guard and switch-apply delta reporting", () => {
-  it("refuses to update the self plugin and points at Obsidian's updater", async () => {
+  it("refuses to update the self plugin mid-run and points at the self pane's own update", async () => {
     const SELF_MANIFEST = JSON.stringify({
       version: 1,
       groups: [{ name: "plugin-config-sync", path: "{configDir}/plugins/config-sync/data.json", type: "file", devices: "all" }],
@@ -997,7 +997,7 @@ describe("self-update guard and switch-apply delta reporting", () => {
     expect(installCalled).toBe(false);
     expect(results[0]?.status).toBe("warning");
     expect(results[0]?.stateNote).toEqual({ kind: "warn", text: "\u26a0 update skipped" });
-    expect((results[0]?.messages ?? []).join(" ")).toContain("Obsidian's plugin updater");
+    expect((results[0]?.messages ?? []).join(" ")).toContain("its own pane in the Sync Center");
     expect(plugins.enabled.has("config-sync")).toBe(true); // never disabled
   });
 
@@ -3662,5 +3662,35 @@ describe("a withheld ENCRYPTED key keeps the other side's envelope, byte for byt
     expect(sent.token).toBe(theirToken); // the withheld key: their own envelope, untouched
     expect(await decryptField("their-pw", sent.other, "fields")).toBe("NEW"); // the travelling key: re-encrypted for them
     expect(sent.theme).toBe("mine");
+  });
+});
+
+describe("updateSelfPlugin", () => {
+  it("downloads and announces before it reloads, pinned to the store's version", async () => {
+    const plugins = new FakePlugins();
+    const calls: string[] = [];
+    const install = async (id: string, _onPhase?: (p: string) => void, target?: string): Promise<string> => {
+      expect(plugins.log).toEqual([]); // nothing reloaded while the download runs
+      calls.push(`install:${id}@${target ?? "latest"}`);
+      return "9.9.9";
+    };
+    const v = await updateSelfPlugin(install, plugins, "9.9.9", (ver) => calls.push(`installed:${ver}`));
+    expect(v).toBe("9.9.9");
+    expect(calls).toEqual(["install:config-sync@9.9.9", "installed:9.9.9"]);
+    expect(plugins.log).toEqual(["reload-manifests", "disable:config-sync", "enable:config-sync"]);
+  });
+
+  it("a failed download reloads nothing", async () => {
+    const plugins = new FakePlugins();
+    await expect(
+      updateSelfPlugin(
+        async () => {
+          throw new Error("couldn't download config-sync 9.9.9 from the community catalog");
+        },
+        plugins,
+        "9.9.9"
+      )
+    ).rejects.toThrow("couldn't download");
+    expect(plugins.log).toEqual([]);
   });
 });
