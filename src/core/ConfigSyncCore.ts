@@ -221,14 +221,20 @@ function serializeSwitchList(v: ReturnType<typeof captureSwitchList>): string {
 
 // On capture, every group's lock entry is rewritten (selected → fresh, others → carried forward).
 // For carried-forward entries of installed plugins, refresh desktopOnly to match the live manifest
-// so the flag lands for the whole plugin set, not just the groups captured this run.
+// so the flag lands for the whole plugin set, not just the groups captured this run. Only when the
+// installed version equals the entry's recorded one: a device on a different version would pin ITS
+// manifest's flag onto an entry that records ANOTHER version's capture — and in a mid-upgrade fleet
+// the two sides then rewrite the flag back and forth on every capture. The fresh-capture path is
+// exempt from this concern: it writes version and flag together from the same manifest.
 function refreshLockDesktopOnly(
   entry: StoreLockEntry,
   group: SyncGroup,
   plugins: PluginHost
 ): StoreLockEntry {
   const pluginId = pluginIdForGroup(group);
-  if (pluginId === null || plugins.getInstalledPluginVersion(pluginId) === null) return entry;
+  if (pluginId === null) return entry;
+  const localVersion = plugins.getInstalledPluginVersion(pluginId);
+  if (localVersion === null || localVersion !== lockSourceVersion(entry, "plugin")) return entry;
   // `innate` is a partition, not a single flag: a claim inside it this build does not
   // know is kept, and only `desktopOnly` is rewritten from the live manifest.
   const { desktopOnly, ...restInnate } = entry.innate ?? {};
@@ -579,6 +585,11 @@ export async function capture(
   // `excluded` doc comment. Optional/defaults to none.
   optedOutForHeal?: ReadonlySet<string>
 ): Promise<GroupResult[]> {
+  // Capture republishes plugin flags/versions from the manifest registry into the lock, but the
+  // registry only rebuilds at app start or after config-sync's own installs — a file-sync tool
+  // (Remotely Save, git) replacing plugin files mid-session leaves it stale. Re-read from disk
+  // before anything below trusts it.
+  await ctx.plugins.reloadPluginManifests();
   const manifest = await loadManifest(ctx);
   // The STORE side of the version gate: the local store lives inside the vault,
   // and the vault is synced by other tools (git, Remotely Save, a file-sync service) — so a newer

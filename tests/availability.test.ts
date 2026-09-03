@@ -63,26 +63,42 @@ describe("availabilityForGroup", () => {
 
 describe("desktopOnlyDrift", () => {
   const g = (name: string, path: string): SyncGroup => withRef({ name, path, type: "file", devices: "all" });
-  it("counts only installed plugins whose lock flag disagrees with the manifest and that have an entry", () => {
+  it("lists only installed plugins whose lock flag disagrees with the manifest and that have an entry", () => {
     const p = new FakePlugins();
     p.installed.set("demo", "1.0.0");
+    p.installedNames.set("demo", "Demo Plugin");
     p.desktopOnlyIds.add("demo"); // manifest: desktop-only
     const groups = [g("plugin-demo", "{configDir}/plugins/demo/data.json")];
-    // entry exists, flag missing → drift
-    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { source: { kind: "plugin", version: "1.0.0" } } }))).toBe(1);
+    // entry exists, flag missing → drift, with the row's display fields
+    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { source: { kind: "plugin", version: "1.0.0" } } }))).toEqual([
+      { id: "demo", label: "Demo Plugin", version: "1.0.0", willBeDesktopOnly: true },
+    ]);
+    // no manifest name → the lock's display label, then the id
+    p.installedNames.delete("demo");
+    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { source: { kind: "plugin", version: "1.0.0" }, display: { label: "Demo (stored)" } } }))[0]?.label).toBe("Demo (stored)");
+    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { source: { kind: "plugin", version: "1.0.0" } } }))[0]?.label).toBe("demo");
     // entry already flagged → no drift
-    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { source: { kind: "plugin", version: "1.0.0" }, innate: { desktopOnly: true } } }))).toBe(0);
-    // no lock entry → not counted (normal capture handles it; avoids a stuck nudge)
-    expect(desktopOnlyDrift(groups, p, lock({}))).toBe(0);
-    // not installed here → not counted
+    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { source: { kind: "plugin", version: "1.0.0" }, innate: { desktopOnly: true } } }))).toEqual([]);
+    // no lock entry → not listed (normal capture handles it; avoids a stuck nudge)
+    expect(desktopOnlyDrift(groups, p, lock({}))).toEqual([]);
+    // not installed here → not listed
     p.installed.delete("demo");
-    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { source: { kind: "plugin", version: "1.0.0" } } }))).toBe(0);
+    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { source: { kind: "plugin", version: "1.0.0" } } }))).toEqual([]);
   });
-  it("does not count a normal (non-desktop-only) installed plugin with no flag", () => {
+  it("does not count a plugin whose installed version differs from the entry's (version drift owns it)", () => {
+    const p = new FakePlugins();
+    p.installed.set("demo", "0.4.20");
+    p.desktopOnlyIds.add("demo"); // this version's manifest is desktop-only
+    const groups = [g("plugin-demo", "{configDir}/plugins/demo/data.json")];
+    // the entry records another device's 0.5.2 capture, where the flag is legitimately absent —
+    // nudging here would ping-pong the flag across a mid-upgrade fleet
+    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { source: { kind: "plugin", version: "0.5.2" } } }))).toEqual([]);
+  });
+  it("does not list a normal (non-desktop-only) installed plugin with no flag", () => {
     const p = new FakePlugins();
     p.installed.set("demo", "1.0.0"); // desktopOnlyIds empty → not desktop-only
     const groups = [g("plugin-demo", "{configDir}/plugins/demo/data.json")];
-    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { source: { kind: "plugin", version: "1.0.0" } } }))).toBe(0);
+    expect(desktopOnlyDrift(groups, p, lock({ "plugin-demo": { source: { kind: "plugin", version: "1.0.0" } } }))).toEqual([]);
   });
 });
 

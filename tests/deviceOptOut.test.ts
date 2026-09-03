@@ -52,6 +52,7 @@ function fakeApp(localStorageApi: object): unknown {
       manifests: { "config-sync": { id: "config-sync", name: "Config Sync", version: "1.0.0" } },
       enabledPlugins: new Set(["config-sync"]),
       plugins: {},
+      loadManifests: async () => {},
     },
     workspace: { getLeavesOfType: () => [] },
     ...localStorageApi,

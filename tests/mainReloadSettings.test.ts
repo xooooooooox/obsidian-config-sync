@@ -46,6 +46,7 @@ function fakeApp(local: Map<string, string> = new Map()): unknown {
       manifests: { "config-sync": { id: "config-sync", name: "Config Sync", version: "1.0.0" } },
       enabledPlugins: new Set(["config-sync"]),
       plugins: {}, // live instances — empty: no BRAT here (see the refreshBratIndex test below)
+      loadManifests: async () => {},
     },
     workspace: { getLeavesOfType: () => [] },
   };

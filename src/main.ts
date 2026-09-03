@@ -653,6 +653,11 @@ export default class ConfigSyncPlugin extends Plugin {
     return {
       computeStatuses: async () => {
         const ctx = await this.coreContext();
+        // The manifest registry only rebuilds at app start or after config-sync's own installs; a
+        // file-sync tool replacing plugin files mid-session leaves it stale, and every availability
+        // and drift answer below reads it. One refresh per panel reload covers selfStatus too —
+        // SyncCenterView.reload() always runs it right after this.
+        await this.pluginHost().reloadPluginManifests();
         const manifest = await loadManifest(ctx);
         const device = Platform.isMobile ? ("mobile" as const) : ("desktop" as const);
         const groupsForThisClass = groupsForDevice(manifest, device);
@@ -755,14 +760,14 @@ export default class ConfigSyncPlugin extends Plugin {
           lock = null;
         }
         const av = availabilityForGroup(selfGroup, this.pluginHost(), lock);
-        const flagsRefreshCount = desktopOnlyDrift(this.compiledGroups, this.pluginHost(), lock);
-        const decided = selfPaneState({ isColdStart: false, groupState: st?.state, drift: av.drift, flagsDrift: flagsRefreshCount > 0 });
+        const flagDrifts = desktopOnlyDrift(this.compiledGroups, this.pluginHost(), lock);
+        const decided = selfPaneState({ isColdStart: false, groupState: st?.state, drift: av.drift, flagsDrift: flagDrifts.length > 0 });
         if (decided.state === "insync") this.setColdStartDismissed(false);
         const versionRefresh =
           decided.versionRefresh && av.localVersion !== null && av.storeVersion !== null ? { local: av.localVersion, store: av.storeVersion } : null;
         const updateAvailable =
           decided.versionBehind && av.localVersion !== null && av.storeVersion !== null ? { local: av.localVersion, store: av.storeVersion } : null;
-        return { state: decided.state, delta, itemCount: localList.length, capturedAt, storePresent, contentChanged: decided.contentChanged, versionRefresh, updateAvailable, flagsRefresh: flagsRefreshCount > 0 ? flagsRefreshCount : null };
+        return { state: decided.state, delta, itemCount: localList.length, capturedAt, storePresent, contentChanged: decided.contentChanged, versionRefresh, updateAvailable, flagsRefresh: flagDrifts.length > 0 ? flagDrifts : null };
       },
       coldStartDismissed: () => this.coldStartDismissed(),
       setColdStartDismissed: (v) => this.setColdStartDismissed(v),

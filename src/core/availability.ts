@@ -66,21 +66,43 @@ export function availabilityForGroup(group: SyncGroup, plugins: PluginHost, lock
   return { kind, drift: driftFor(localVersion, storeVersion), localVersion, storeVersion, anchor: "app", desktopOnly: false };
 }
 
-// Counts installed plugin groups whose local desktop-only status differs from what the lock
+// One installed plugin whose lock flag disagrees with its manifest — what a capture will correct.
+export interface DesktopOnlyFlagDrift {
+  id: string;
+  label: string; // installed manifest name, lock display label as fallback, id as last resort
+  version: string; // the entry's recorded version (equals the installed one — see the gate below)
+  willBeDesktopOnly: boolean; // capture writes the flag (true) or clears it (false)
+}
+
+// Installed plugin groups whose local desktop-only status differs from what the lock
 // records AND that a capture can fix (an entry already exists). Used to nudge a capture so the
 // flag propagates to devices that can't read the manifest (mobile). Excludes entryless groups so
 // the nudge can't get stuck on a never-captured plugin (the normal capture path handles those).
-export function desktopOnlyDrift(groups: SyncGroup[], plugins: PluginHost, lock: StoreLock | null): number {
-  let n = 0;
+// Excludes version-mismatched groups too: a device holding a different plugin version than the
+// entry records answers for a manifest the store didn't capture — that's version drift with its
+// own surface, and counting it here made every mid-upgrade fleet ping-pong the nudge between
+// devices (each capture republishing its own version's flag over the other's).
+export function desktopOnlyDrift(groups: SyncGroup[], plugins: PluginHost, lock: StoreLock | null): DesktopOnlyFlagDrift[] {
+  const drifts: DesktopOnlyFlagDrift[] = [];
   for (const g of groups) {
     const id = pluginIdForGroup(g);
     if (id === null) continue; // app-anchored
-    if (plugins.getInstalledPluginVersion(id) === null) continue; // not installed here
+    const localVersion = plugins.getInstalledPluginVersion(id);
+    if (localVersion === null) continue; // not installed here
     const entry = lockEntry(lock, g.ref);
-    if (lockSourceVersion(entry, "plugin") === null) continue; // no entry to refresh
-    if (plugins.isDesktopOnly(id) !== lockDesktopOnly(entry)) n++;
+    const storeVersion = lockSourceVersion(entry, "plugin");
+    if (storeVersion === null) continue; // no entry to refresh
+    if (localVersion !== storeVersion) continue; // version drift, not flag drift
+    const willBeDesktopOnly = plugins.isDesktopOnly(id);
+    if (willBeDesktopOnly === lockDesktopOnly(entry)) continue;
+    drifts.push({
+      id,
+      label: plugins.getInstalledPluginName(id) ?? entry?.display?.label ?? id,
+      version: storeVersion,
+      willBeDesktopOnly,
+    });
   }
-  return n;
+  return drifts;
 }
 
 // Plugin ids config-sync treats as desktop-only on THIS device — the same manifest-first,

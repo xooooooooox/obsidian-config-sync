@@ -325,6 +325,57 @@ describe("capture", () => {
     expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.2.3" }, innate: { desktopOnly: true } });
   });
 
+  it("leaves a carried-forward flag untouched when the installed version differs from the entry's", async () => {
+    const { io, plugins, ctx } = setup();
+    // This device still runs 1.2.0, whose manifest is desktop-only; the entry records another
+    // device's 1.2.3 capture where the flag is legitimately absent. Backfilling from a version the
+    // store didn't record would ping-pong the flag across a mid-upgrade fleet.
+    plugins.installed.set("demo", "1.2.0");
+    plugins.desktopOnlyIds.add("demo");
+    io.seed({
+      ".obs/plugins/demo/data.json": "{}",
+      ".obs/hotkeys.json": "{}",
+      ".obs/snippets/one.css": "x",
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: { "community": {"demo": { source: { kind: "plugin", version: "1.2.3" } }}, "obsidian": {"hotkeys": { source: { kind: "app", version: "1.0.0" } }} } }),
+    });
+    await seedGroups(ctx, MANIFEST);
+    await capture(ctx, ["hotkeys"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.2.3" } });
+  });
+
+  it("keeps a carried-forward flag when a version-mismatched device is no longer desktop-only", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.0"); // not desktop-only at this version
+    io.seed({
+      ".obs/plugins/demo/data.json": "{}",
+      ".obs/hotkeys.json": "{}",
+      ".obs/snippets/one.css": "x",
+      "cs/store.lock.json": JSON.stringify({ capturedAt: "t", items: { "community": {"demo": { source: { kind: "plugin", version: "1.2.3" }, innate: { desktopOnly: true } }}, "obsidian": {"hotkeys": { source: { kind: "app", version: "1.0.0" } }} } }),
+    });
+    await seedGroups(ctx, MANIFEST);
+    await capture(ctx, ["hotkeys"]);
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["community"]?.["demo"]).toEqual({ source: { kind: "plugin", version: "1.2.3" }, innate: { desktopOnly: true } });
+  });
+
+  it("re-reads plugin manifests before capture trusts them", async () => {
+    const { io, plugins, ctx } = setup();
+    plugins.installed.set("demo", "1.2.3");
+    // A registry outdated by an external file sync: the desktop-only fact only appears once
+    // manifests are re-read from disk.
+    plugins.reloadPluginManifests = async () => {
+      plugins.log.push("reload-manifests");
+      plugins.desktopOnlyIds.add("demo");
+    };
+    io.seed({ ".obs/plugins/demo/data.json": "{}", ".obs/hotkeys.json": "{}", ".obs/snippets/one.css": "x" });
+    await seedGroups(ctx, MANIFEST);
+    await capture(ctx);
+    expect(plugins.log).toContain("reload-manifests");
+    const lock = JSON.parse(await io.read("cs/store.lock.json")) as { items: Record<string, Record<string, StoreLockEntry>> };
+    expect(lock.items["community"]?.["demo"]).toEqual(capturedEntry({ source: { kind: "plugin", version: "1.2.3" }, innate: { desktopOnly: true } }));
+  });
+
   it("skips OS junk when capturing dirs and cleans junk already in the store", async () => {
     const { io, plugins, ctx } = setup();
     plugins.installed.set("demo", "1.2.3");
