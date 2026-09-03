@@ -28,7 +28,7 @@ import {
 } from "./enablementRow";
 import { paintMergedControl } from "./mergedControl";
 import { nextCompact, sidebarNeededWidth, SidebarRowNeed } from "./sidebarFit";
-import { Availability } from "../core/availability";
+import { Availability, DesktopOnlyFlagDrift } from "../core/availability";
 import { REUSE_MAX_AGE_MS } from "../external/readerCache";
 import { remoteRowStatuses, skipRefsForSelection } from "../core/remoteRows";
 import { PASSPHRASE_ANCHOR_ID } from "./SettingTab";
@@ -418,7 +418,7 @@ export interface SelfSyncInfo {
   contentChanged: boolean; // config-sync's own data.json differs beyond the list → pane shows a diff
   versionRefresh: { local: string; store: string } | null; // content in-sync but plugin version ahead
   updateAvailable: { local: string; store: string } | null; // plugin version behind the store's captured version — advisory only
-  flagsRefresh: number | null; // installed plugins whose desktopOnly flag isn't recorded yet → nudge a capture
+  flagsRefresh: DesktopOnlyFlagDrift[] | null; // installed plugins whose desktopOnly flag the lock has wrong → nudge a capture, one row each
 }
 
 export interface SyncCenterHost {
@@ -674,6 +674,7 @@ export class SyncCenterView extends ItemView {
   private viewPickerOpen = false;
   private selfInfo: SelfSyncInfo | null = null;
   private selfDiffOpen = new Set<Direction>(); // which self data.json diffs are expanded
+  private selfFlagsDiffOpen = false; // the flags nudge's store.lock.json expander
   private landedInitial = false; // cold-start auto-land to the Config Sync pane happens once
   private search = "";
   private betaIds: Set<string> = new Set();
@@ -1917,17 +1918,66 @@ export class SyncCenterView extends ItemView {
     }
     if (!info.contentChanged) {
       // No data.json diff to show; fill the capture block with the flags nudge if one is pending.
-      if (dir === "capture" && info.flagsRefresh !== null) {
-        const n = info.flagsRefresh;
-        block.createDiv({
-          cls: "config-sync-self-block-s",
-          text: `${n} desktop-only plugin${n === 1 ? "" : "s"} not recorded in the store yet. Capturing lets your phones skip installs that can't run there.`,
-        });
-      }
+      if (dir === "capture" && info.flagsRefresh !== null) this.renderFlagsNudge(block, info.flagsRefresh, "solo");
       return;
     }
     block.createDiv({ cls: "config-sync-self-block-s", text: "Config Sync's own settings changed:" });
     this.renderSelfDataJsonDiff(block.createDiv({ cls: "config-sync-inline-diff" }), dir);
+    // The flag refresh rides along with any capture, so the block must say so — nothing capture
+    // writes may stay invisible (the flag used to be rewritten silently under this diff).
+    if (dir === "capture" && info.flagsRefresh !== null) this.renderFlagsNudge(block, info.flagsRefresh, "also");
+  }
+
+  // The desktop-only flag nudge: one row per plugin whose lock flag disagrees with its manifest.
+  // Copy contract (DESIGN.md, self pane): capture sentences take the store's record as their
+  // object, never the other devices — capture writes records; phones act on their own next apply.
+  private renderFlagsNudge(block: HTMLElement, drifts: DesktopOnlyFlagDrift[], mode: "solo" | "also"): void {
+    block.createDiv({
+      cls: "config-sync-self-block-s",
+      text:
+        mode === "solo"
+          ? "The store's record of which plugins can run on phones is out of date. Phones use it to skip installs that can't run there. Capture corrects the record:"
+          : "Capture also corrects the store's record of which plugins can run on phones:",
+    });
+    const rows = block.createDiv({ cls: "config-sync-flag-rows" });
+    for (const d of drifts) {
+      const row = rows.createDiv({ cls: "config-sync-flag-row" });
+      setIcon(row.createSpan({ cls: "config-sync-flag-ic" }), d.willBeDesktopOnly ? "monitor" : "smartphone");
+      const body = row.createDiv();
+      body.createDiv({ cls: "config-sync-flag-name", text: d.label });
+      body.createDiv({
+        cls: "config-sync-flag-why",
+        text: d.willBeDesktopOnly
+          ? "Can't run on phones. The store doesn't say so yet."
+          : "Runs on phones now. The store still says it can't.",
+      });
+    }
+    const open = this.selfFlagsDiffOpen;
+    const link = block.createDiv({ cls: "config-sync-self-viewchange" });
+    renderFoldChevron(link, open, null);
+    link.appendText(open ? "hide change (store.lock.json)" : "view change (store.lock.json)");
+    link.addEventListener("click", () => {
+      this.selfFlagsDiffOpen = !open;
+      this.render(this.renderGen);
+    });
+    if (open) this.renderFlagsLockDiff(block.createDiv({ cls: "config-sync-inline-diff" }), drifts);
+  }
+
+  // The semantic lock lines only — per entry: its key, its source line for anchoring, and the
+  // innate line capture will write or remove. capturedAt/hash churn is deliberately not shown
+  // (it drowns the two lines that matter), so this is built from the drift list rather than by
+  // diffing a dry-run lock.
+  private renderFlagsLockDiff(holder: HTMLElement, drifts: DesktopOnlyFlagDrift[]): void {
+    const box = holder.createDiv({ cls: "config-sync-cm-unified" });
+    drifts.forEach((d, i) => {
+      if (i > 0) box.createDiv({ cls: "config-sync-cm-dgap", text: "⋯" });
+      box.createDiv({ cls: "config-sync-cm-dline is-common", text: `  "${d.id}": {` });
+      box.createDiv({ cls: "config-sync-cm-dline is-common", text: `    "source": { "kind": "plugin", "version": "${d.version}" },` });
+      const line = `    "innate": { "desktopOnly": true }`;
+      if (d.willBeDesktopOnly) box.createDiv({ cls: "config-sync-cm-dline is-ins", text: `+ ${line}` });
+      else box.createDiv({ cls: "config-sync-cm-dline is-del", text: `- ${line}` });
+      box.createDiv({ cls: "config-sync-cm-dline is-common", text: `  }` });
+    });
   }
 
   private renderSelfDataJsonDiff(holder: HTMLElement, dir: Direction): void {

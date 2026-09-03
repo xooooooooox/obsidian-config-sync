@@ -1172,6 +1172,20 @@ noted):
   last-chance re-scan). No subtitle line on any picker tab — the cards
   themselves say what syncs.
 - **Self pane** (Config Sync's own state) `config-sync-self-pane` — `-self-title/-self-title-ic/-self-title-sp/-self-sub`, `-self-settings-btn`/`-self-settings-ic` (title-row Settings), `-self-block/-block-h/-block-s`, membership delta `-self-delta/-self-drow/-self-dg`, `-self-viewchange` (expandable `data.json` diff), `-self-pill/-self-hint/-self-caution/-self-acts`.
+  - **Desktop-only flag refresh** (capture block; `-flag-rows/-flag-row/-flag-ic/-flag-name/-flag-why`):
+    when the store's phone-compatibility record drifts from an installed manifest (same-version
+    only — a version mismatch is version drift's business), the block lists each plugin as a
+    fact pair — its manifest truth plus what the store still says ("Runs on phones now. The
+    store still says it can't.") — under "…Capture corrects the record:". Icons: `monitor`
+    (flag will be written) / `smartphone` (flag will clear). **Copy contract**: capture
+    sentences take the store's record as their object, never the other devices ("Your phones
+    will skip it" is banned — capture writes records; phones act on their own next apply, and
+    why phones care is said once in the intro). A `-self-viewchange` expander
+    ("view change (store.lock.json)") shows only the semantic lock lines per entry — the entry
+    key, its `source` line for anchoring, and the `innate` line that changes — one expander for
+    the whole file, capturedAt/hash churn filtered out. Mixed state (own data.json diff pending
+    too): the diff renders first, then the same rows under "Capture also corrects the store's
+    record…" — the block lists everything capture writes, nothing rides along silently.
 - **Qualifier autocomplete** `config-sync-qac/-qac-opt` (is-sel)/`-qac-ic/-qac-txt/-qac-desc` — the `key:value` search dropdown under both search boxes, anchored by `config-sync-search-wrap`; opens on focus (an empty box lists every key), key→value suggestions, keyboard-navigable. Logic in `src/ui/qualifierSearch.ts`.
 - **Settings tab** (`src/ui/SettingTab.ts`): `config-sync-tabs/-tab` (phone hides inactive
   labels — the pattern the mobile filter pills echo), rows/expand/form-*, fields editor

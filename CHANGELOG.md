@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.25.5
+
+- Fixed the "desktop-only plugin not recorded in the store yet" nudge bouncing between devices forever after a plugin update changed whether it can run on phones. A device still holding the older version kept writing its outdated answer into the store on every capture, and every up-to-date device then asked to capture it right back. A device now only speaks for a plugin's phone-compatibility when it actually has the version the store records; a version mismatch shows up as the version difference it is
+- Fixed capture and the Sync Center trusting Obsidian's in-memory list of installed plugins, which goes stale when a sync tool such as Remotely Save replaces plugin files mid-session. Both now re-read the manifests from disk first, so recorded versions and phone-compatibility reflect what is actually installed
+- Changed the desktop-only capture hint from a bare count to one row per plugin: each names the plugin and states what it can do versus what the store still says, and a "view change (store.lock.json)" expander shows the exact lines Capture will write. When Config Sync's own settings diff is pending too, the rows now appear under it instead of the record being corrected silently
+
 ## 2.25.4
 
 - Fixed a desktop-only plugin's card wearing two identical monitor badges when its settings file carries a Desktop only rule. That rule merely restates what the manifest already enforces, so it no longer counts toward the cyan device-scoped badge — a real pin, such as a key set to Mobile only, still does

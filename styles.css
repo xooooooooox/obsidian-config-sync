@@ -1015,6 +1015,12 @@ button.is-busy::before { content: ""; width: 11px; height: 11px; margin-right: 6
 .config-sync-self-acts button.config-sync-btn-capture { background: var(--color-orange); color: var(--background-primary); border: none; }
 .config-sync-self-hint { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 .config-sync-self-viewchange { color: var(--interactive-accent); font-size: var(--font-ui-smaller); cursor: pointer; margin-top: var(--size-4-1); }
+.config-sync-flag-rows { display: flex; flex-direction: column; gap: var(--size-4-2); margin-bottom: 11px; }
+.config-sync-flag-row { display: flex; align-items: flex-start; gap: var(--size-4-2); }
+.config-sync-flag-ic { color: var(--text-muted); display: flex; margin-top: 2px; }
+.config-sync-flag-ic svg { width: var(--icon-s); height: var(--icon-s); }
+.config-sync-flag-name { font-size: var(--font-ui-small); font-weight: var(--font-semibold); }
+.config-sync-flag-why { color: var(--text-muted); font-size: var(--font-ui-smaller); }
 
 .config-sync-main { display: flex; flex-direction: column; min-width: 0; }
 
