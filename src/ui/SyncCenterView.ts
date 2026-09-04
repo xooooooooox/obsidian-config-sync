@@ -510,6 +510,10 @@ export interface SyncCenterHost {
   // Contents for an inline change diff: base = current state of the target side, produced =
   // what the pending action (capture/apply) would write. null = no diff available.
   diffPair(name: string, rel: string, dir: Direction): Promise<{ base: string; produced: string } | null>;
+  // Whether this device has a sync passphrase set. Gates the whole-file-encrypted file entries'
+  // "no preview" note: with a passphrase, diffPair decrypts the store side and the entries keep
+  // their normal diff affordance; without one the store copy is genuinely unreadable.
+  passphraseSet(): boolean;
   // The two enablement layers, one read/write pair each — the SAME pair the Settings
   // panel's card rows call, so the three entrances cannot drift apart.
   // The fleet rule for one element of one list.
@@ -3560,10 +3564,17 @@ export class SyncCenterView extends ItemView {
     // the way this remote does not (spec 3.3). The row stays quiet; the card still shows what moved
     // over there, with a badge that carries no direction because these files will not travel.
     const withheld = remoteRelation && !unreadable && previewDir === null && !input.excludedHere && hasChanges(changes);
+    // The chip on the row keeps FateInput.encrypted's shape semantics (an envelope in the store is
+    // a fact regardless of keys); the file entries' "no preview" note is narrower — under the
+    // device relation diffPair decrypts the store side whenever a passphrase is set, so the note
+    // only stays while the store copy is genuinely unreadable. Under a remote relation the diff
+    // renders both sides' raw store copies (renderRemoteFileDiff) — for an envelope that would be
+    // ciphertext as a line diff, so the note stays shape-based there.
+    const encryptedNoPreview = input.encrypted && (remoteRelation || !this.host.passphraseSet());
     if (previewDir !== null && hasChanges(changes)) {
-      this.renderFilesRow(fields, r, changes, previewDir, input.encrypted, isConflict ? this.conflictResolve(r, changes) : null);
+      this.renderFilesRow(fields, r, changes, previewDir, encryptedNoPreview, isConflict ? this.conflictResolve(r, changes) : null);
     } else if (withheld) {
-      this.renderFilesRow(fields, r, changes, null, input.encrypted, null);
+      this.renderFilesRow(fields, r, changes, null, encryptedNoPreview, null);
     }
 
     // The flip list the retired remote pane pinned under its section head: under this relation the

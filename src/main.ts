@@ -93,7 +93,7 @@ import { unexchangedPatternPredicate, withheldPatternPredicate } from "./core/ke
 import { compareStoreItem, refsNeedingContentCompare } from "./core/itemCompare";
 import { migrateV5Settings } from "./core/v5Migration";
 import { applySwitchList, captureSwitchList, EnablementList, enablementListFile, isSwitchListGroup, localRealPath, parseSwitchList, readLocalSwitchList, subtractForceOff, switchDivergence, SwitchList, switchListMemberOn, writeLocalSwitchList } from "./core/switchList";
-import { applyTransform, captureTransform, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
+import { applyTransform, captureTransform, decodeFileEnvelope, isWholeFileEncrypted, scanSensitive, SensitiveScan } from "./core/modes";
 import { PkmMode, PkmProbe, resolveEffectiveMode, resolveRootPath } from "./core/pkm";
 import { pluginRuntimeEnabled } from "./core/pluginState";
 import { syncListDelta } from "./core/syncListDelta";
@@ -780,7 +780,12 @@ export default class ConfigSyncPlugin extends Plugin {
       diffPair: async (name, rel, dir) => {
         try {
           const group = this.compiledGroups.find((g) => g.name === name);
-          if (group === undefined || isWholeFileEncrypted(group)) return null;
+          if (group === undefined) return null;
+          // A whole-file envelope previews as plaintext vs plaintext with the same key a run
+          // uses; without a passphrase the store side is genuinely unreadable — no preview
+          // (2026-09-04 spec: the original "encrypted WITHOUT passphrase → null" rule).
+          const wholePw = isWholeFileEncrypted(group) ? this.passphrase() : null;
+          if (isWholeFileEncrypted(group) && wholePw === null) return null;
           const io = this.app.vault.adapter;
           const real = localRealPath(name, group.path, this.app.vault.configDir);
           const rootPath = await this.resolvedRootPath();
@@ -809,10 +814,13 @@ export default class ConfigSyncPlugin extends Plugin {
                 produced = (await captureTransform(group, local, this.passphrase(), cls, store, undefined, fieldExc)).content;
               }
             }
-            return { base: store ?? "", produced };
+            const base = wholePw !== null && store !== null ? await decodeFileEnvelope(wholePw, store, group.name) : store ?? "";
+            return { base, produced };
           }
           let produced = store ?? "";
-          if (group.type === "file" && store !== null) {
+          if (wholePw !== null && store !== null) {
+            produced = await decodeFileEnvelope(wholePw, store, group.name);
+          } else if (group.type === "file" && store !== null) {
             if (isSwitchListGroup(name)) {
               const st = parseSwitchList(store);
               if (st !== null) {
@@ -832,6 +840,7 @@ export default class ConfigSyncPlugin extends Plugin {
           return null; // e.g. passphrase needed for field encryption — no diff available
         }
       },
+      passphraseSet: () => this.passphrase() !== null,
       isDesktopOnlyPlugin: (id) => {
         const manifest = this.pluginRegistry().manifests[id];
         return manifest === undefined ? null : manifest.isDesktopOnly === true;

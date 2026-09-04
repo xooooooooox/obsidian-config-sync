@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.25.7
+
+- Fixed an encrypted item's changed files reading `changed (encrypted, no preview)` even while this device holds the sync passphrase. The preview now opens the store's copy with that passphrase and shows the change as the settings you'd read — never ciphertext — so you can see exactly what a capture or apply would write to an encrypted item before running it. Without a passphrase the note stays, honestly: the store's copy really can't be read then. While a remote is selected the note also stays, because that comparison shows the two stores' copies as they are kept
+
 ## 2.25.6
 
 - Changed the self pane's update-available banner from sending you to Settings → Community plugins to updating in place: **Update Config Sync** downloads the version the store was captured on and reloads the plugin, with download progress shown under the button. The files are written while the current version keeps running, and the reload happens only once everything is on disk, so a failed download changes nothing; the banner then shows the download error and only at that point offers the manual Community plugins path

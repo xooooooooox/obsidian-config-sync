@@ -727,6 +727,9 @@ export interface FileEntryPresentation {
 export function fileEntryFor(
   change: { kind: "added" | "updated" | "deleted"; rel: string },
   effDir: "apply" | "capture",
+  // "This entry's store copy cannot be previewed" — the caller folds key state in (an envelope
+  // WITH a passphrase previews decrypted, see SyncCenterView's encryptedNoPreview), so true here
+  // means genuinely unreadable, not merely "stored encrypted".
   encrypted: boolean
 ): FileEntryPresentation {
   const effectiveKind: "added" | "updated" | "deleted" =

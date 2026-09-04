@@ -69,7 +69,8 @@ export function groupNeedsPassphrase(group: SyncGroup): boolean {
 // True when the group's STORE copy is a whole-file encryption envelope — either mode:"encrypted"
 // or a Plain-mode FileRule with encrypted:true. Callers that would otherwise diff
 // raw local content against the raw store copy (e.g. the Sync Center's interactive diff panel)
-// must suppress that comparison for these groups instead of showing ciphertext as a line diff.
+// must decrypt the store side first, or — with no passphrase set — suppress the comparison:
+// ciphertext must never appear as a line diff.
 export function isWholeFileEncrypted(group: SyncGroup): boolean {
   return group.mode === "encrypted" || group.fileRule?.encrypted === true;
 }

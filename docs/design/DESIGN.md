@@ -940,7 +940,10 @@ noted):
   diffable/viewable, never per-kind icons: the point is "changes live here, click to see,"
   tooltip `View changes` (diff) / `View content` (an added file, nothing local to diff
   against yet); the OPEN state turns the icon accent-colored; an encrypted entry keeps its
-  no-affordance note instead; the `capFileEntries` 10-cap + "… N more files" line applies
+  no-affordance note only while the store copy is genuinely unreadable — no passphrase on this
+  device, or a remote relation (whose diff shows raw store copies); under the device relation
+  with a passphrase `diffPair` decrypts the store side and the entry diffs as plaintext like
+  any other; the `capFileEntries` 10-cap + "… N more files" line applies
   inside the expanded state) · the conflict pair (`Use theirs` / `Keep mine`, TWO CHIPS
   in the card's own control family, not a segmented control: same `3px 8px` box, border and radius
   as `After install`/`Enablement` beside them. Since AC/T2 the chips REST in the menuchip family —
